@@ -33,7 +33,7 @@ from util import nearestPoint
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
-               first = 'OffensiveReflexAgent', second = 'DefensiveReflexAgent'):
+               first = 'CapsuleReflexAgent', second = 'AttackReflexAgent'):
   """
   This function should return a list of two agents that will form the
   team, initialized using firstIndex and secondIndex as their agent
@@ -63,49 +63,49 @@ class ReflexCaptureAgent(CaptureAgent):
     self.start = gameState.getAgentPosition(self.index)
     CaptureAgent.registerInitialState(self, gameState)
 
-  def findPath(self, gameState, travelTo):
+  def findPathAndCost(self, gameState, travelTo):
     openNodes = [Node(gameState, None, None, 0, 0)]
     closedNodes = []
 
     currentNode = openNodes[0]
 
-    i = 0 #fixme
-    print("begin loop")
     while(len(openNodes) != 0):
-      print("\niteration: " + str(i)) #fixme
       nodeAndIndex = self.findLowestTotalCostNodeAndPop(openNodes)
       currentNode = nodeAndIndex[0]
+      currentAgentPosition = currentNode.state.getAgentPosition(self.index)
       del openNodes[nodeAndIndex[1]]
-      print("current low cost node: " + str(currentNode)) #fixme
 
       legalActions = currentNode.state.getLegalActions(self.index)  # gameState.getLegalActions(self.index)
-      print("legal actions: " + str(legalActions)) #fixme
 
       successors = []
-      j = 0
       for action in legalActions:
         successor = currentNode.state.generateSuccessor(self.index, action)
-        print(successor.getAgentPosition(self.index))
+        successorAgentPosition = successor.getAgentPosition(self.index)
+
+        # if(currentAgentPosition[0] - successorAgentPosition[0] > 1 or currentAgentPosition[0] - successorAgentPosition[0] < 1
+        # or currentAgentPosition[1] - successorAgentPosition[1] > 1 or currentAgentPosition[1] - successorAgentPosition[1] < 1):
+
+
+        heuristics = self.calculateHeuristicCosts(successor, successor.getAgentPosition(self.index), travelTo)
         successors.append(Node(
           successor,
           currentNode,
           action,
-          currentNode.generalCost + 1,
-          currentNode.generalCost + 1 + self.calculateHeuristic(successor, successor.getAgentPosition(self.index), travelTo)
+          # general cost when evaluating total cost of path includes enemyCost
+          currentNode.generalCost + 1 + heuristics[0],
+          # heuristic cost also includes distance from destination
+          currentNode.generalCost + 1 + heuristics[1]
           ))
-        # print("successor " + str(j) + ": " + str(successor))
-        j += 1
 
       for s in successors:
         if(self.agentPositionMatchesDestination(s, travelTo)):
-          path = self.generatePathOfActions(s)
-          # print("generated path: " + str(path))
-          return path
+          pathAndCost = self.generatePathOfActions(s)
+          return pathAndCost
 
         if(self.nodeShouldBeOpened(s, openNodes, closedNodes)):
           openNodes.append(s)
-    print("end loop")
-    closedNodes.append(currentNode)
+      closedNodes.append(currentNode)
+    return None
 
   def findLowestTotalCostNodeAndPop(self, openList):
     lowestNode = openList[0]
@@ -141,50 +141,49 @@ class ReflexCaptureAgent(CaptureAgent):
     return True
 
   def generatePathOfActions(self, node):
+    totalCost = node.generalCost
     actionList = []
     currentNode = node
     while(currentNode.parent != None):
       actionList.insert(0, currentNode.action)
       currentNode = currentNode.parent
 
-    print(actionList)
-    return actionList
+    return (actionList, totalCost)
 
-  def calculateHeuristic(self, gameState, travelFrom, travelTo):
-    distance = self.getMazeDistance(travelFrom, travelTo)
-    return distance
+  def calculateHeuristicCosts(self, gameState, travelFrom, travelTo):
+    distanceCost = 0
+    enemyCost = 0
+    closestEnemy = 999999
 
-  def chooseAction(self, gameState):
-    """
-    Picks among the actions with the highest Q(s,a).
-    """
-    actions = gameState.getLegalActions(self.index)
+    # calculate distance to target
+    distanceCost = self.getMazeDistance(travelFrom, travelTo)
 
-    capsule = self.getCapsules(gameState)
-    # print(capsule)
+    # calculate closest defender
+    agents = self.getOpponents(gameState)
+    for a in agents:
+      state = gameState.getAgentState(a)
+      if("Ghost" in str(state) and state.scaredTimer == 0):
+        enemyPosition = gameState.getAgentPosition(a)
+        proximity = 999999
 
-    path = self.findPath(gameState, capsule[0])
+        if(enemyPosition != None):
+          proximity = self.getMazeDistance(gameState.getAgentPosition(self.index), enemyPosition)
+          print("Enemy Proximity: " + str(proximity))
 
-    # You can profile your evaluation time by uncommenting these lines
-    # start = time.time()
-    values = [self.evaluate(gameState, a) for a in actions]
-    if self.index == 1:
-      print(values, file=sys.stderr)
-      # print(self.getPreviousObservation(), file=sys.stderr)
+        if(proximity < closestEnemy):
+          closestEnemy = proximity
 
-    # print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
+    # calculate closest defender cost
+    if(closestEnemy == 4):
+      enemyCost = 3
+    elif(closestEnemy == 3):
+      enemyCost = 7
+    elif(closestEnemy == 2):
+      enemyCost = 15
+    elif(closestEnemy == 1):
+      enemyCost = 50
 
-    maxValue = max(values)
-    bestActions = [a for a, v in zip(actions, values) if v == maxValue]
-    # if self.index == 1:
-    #   print(bestActions, file=sys.stderr)
-
-    foodLeft = len(self.getFood(gameState).asList())
-
-    print(path)
-    return path[0]
-
-    # return random.choice(bestActions)
+    return (enemyCost, distanceCost + enemyCost)
 
   def getSuccessor(self, gameState, action):
     """
@@ -198,89 +197,59 @@ class ReflexCaptureAgent(CaptureAgent):
     else:
       return successor
 
-  def evaluate(self, gameState, action):
-    """
-    Computes a linear combination of features and feature weights
-    """
+  def getLowestCostFoodPath(self, gameState):
+    food = self.getFood(gameState).asList()
 
-    features = self.getFeatures(gameState, action)
-    weights = self.getWeights(gameState, action)
+    lowestCost = 99999
+    lowestPath = None
 
-    if self.index == 1:
-      print(str(features) + str(weights), file=sys.stderr)
-      # print(gameState.getAgentState(self.index)) # Print out a text representation of the world.
+    for f in food:
+      path = self.findPathAndCost(gameState, f)
+      if(path != None and path[1] < lowestCost):
+        lowestPath = path[0]
+        lowestCost = path[1]
 
-    return features * weights
+    return lowestPath
 
-  def getFeatures(self, gameState, action):
-    """
-    Returns a counter of features for the state
-    """
-    features = util.Counter()
-    successor = self.getSuccessor(gameState, action)
-    features['successorScore'] = self.getScore(successor)
+  def notHoldingGameWinningFood(self, gameState):
+    foodHolding = 0
+    agents = self.getTeam(gameState)
+    for a in agents:
+      foodHolding += gameState.getAgentState(a).numCarrying
+    return len(self.getFood(gameState).asList()) >= 2
 
-    return features
+  def shouldRetreat(self, gameState):
+     previousState = gameState
 
-  def getWeights(self, gameState, action):
-    """
-    Normally, weights do not depend on the gamestate.  They can be either
-    a counter or a dictionary.
-    """
-    return {'successorScore': 1.0}
-
-class OffensiveReflexAgent(ReflexCaptureAgent):
+class CapsuleReflexAgent(ReflexCaptureAgent):
   """
   A reflex agent that seeks food. This is an agent
   we give you to get an idea of what an offensive agent might look like,
   but it is by no means the best or only way to build an offensive agent.
   """
-  def getFeatures(self, gameState, action):
-    features = util.Counter()
-    successor = self.getSuccessor(gameState, action)
 
-    myState = successor.getAgentState(self.index)
-    myPos = myState.getPosition()
+  def chooseAction(self, gameState):
+    capsule = self.getCapsules(gameState)
+    if(len(capsule) > 0):
+      capsulePath = self.findPathAndCost(gameState, capsule[0])
+      if(capsulePath != None):
+        return capsulePath[0][0]
+    if (len(self.getFood(gameState).asList()) > 0 and self.notHoldingGameWinningFood(gameState)):
+        return self.getLowestCostFoodPath(gameState)[0]
 
-    foodList = self.getFood(successor).asList()
-    features['successorScore'] = -len(foodList)#self.getScore(successor)
 
-    # Compute distance to the nearest food
-    if len(foodList) > 0: # This should always be True,  but better safe than sorry
-      myPos = successor.getAgentState(self.index).getPosition()
-      minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
-      features['distanceToFood'] = minDistance
 
-    # Determine if the enemy is closer to you than they were last time
-    # and you are in their territory.
-    # Note: This behavior isn't perfect, and can force Pacman to cower
-    # in a corner.  I leave it up to you to improve this behavior.
-    close_dist = 9999.0
-    if self.index == 1 and gameState.getAgentState(self.index).isPacman:
-      opp_fut_state = [successor.getAgentState(i) for i in self.getOpponents(successor)]
-      chasers = [p for p in opp_fut_state if p.getPosition() != None and not p.isPacman]
-      if len(chasers) > 0:
-        close_dist = min([float(self.getMazeDistance(myPos, c.getPosition())) for c in chasers])
-
-      # View the action and close distance information for each
-      # possible move choice.
-      print("Action: "+str(action))
-      print("\t\t"+str(close_dist), sys.stderr)
-
-    features['fleeEnemy'] = 1.0/close_dist
-
-    return features
-
-  def getWeights(self, gameState, action):
-    return {'successorScore': 100, 'distanceToFood': -1, 'fleeEnemy': -100.0}
-
-class DefensiveReflexAgent(ReflexCaptureAgent):
+class AttackReflexAgent(ReflexCaptureAgent):
   """
   A reflex agent that keeps its side Pacman-free. Again,
   this is to give you an idea of what a defensive agent
   could be like.  It is not the best or only way to make
   such an agent.
   """
+
+  def chooseAction(self, gameState):
+    if (len(self.getFood(gameState).asList()) > 0 and self.notHoldingGameWinningFood(gameState)):
+      return self.getLowestCostFoodPath(gameState)[0]
 
   def getFeatures(self, gameState, action):
     features = util.Counter()
