@@ -230,8 +230,6 @@ class CapsuleReflexAgent(ReflexCaptureAgent):
 
   def chooseAction(self, gameState):
 
-    print("walls : " + str(gameState.data.layout.walls.asList()))
-
     capsule = self.getCapsules(gameState)
     if(len(capsule) > 0):
       capsulePath = self.findPathAndCost(gameState, capsule[0], 999999)
