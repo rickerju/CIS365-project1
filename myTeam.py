@@ -63,7 +63,7 @@ class ReflexCaptureAgent(CaptureAgent):
     self.start = gameState.getAgentPosition(self.index)
     CaptureAgent.registerInitialState(self, gameState)
 
-  def findPathAndCost(self, gameState, travelTo):
+  def findPathAndCost(self, gameState, travelTo, maxCost):
     openNodes = [Node(gameState, None, None, 0, 0)]
     closedNodes = []
 
@@ -82,11 +82,12 @@ class ReflexCaptureAgent(CaptureAgent):
         successor = currentNode.state.generateSuccessor(self.index, action)
         successorAgentPosition = successor.getAgentPosition(self.index)
 
-        # if(currentAgentPosition[0] - successorAgentPosition[0] > 1 or currentAgentPosition[0] - successorAgentPosition[0] < 1
-        # or currentAgentPosition[1] - successorAgentPosition[1] > 1 or currentAgentPosition[1] - successorAgentPosition[1] < 1):
-
-
         heuristics = self.calculateHeuristicCosts(successor, successor.getAgentPosition(self.index), travelTo)
+
+        # if current successor is to expensive, don't evaluate further
+        if(heuristics[0] > maxCost):
+          continue
+
         successors.append(Node(
           successor,
           currentNode,
@@ -162,13 +163,12 @@ class ReflexCaptureAgent(CaptureAgent):
     agents = self.getOpponents(gameState)
     for a in agents:
       state = gameState.getAgentState(a)
-      if("Ghost" in str(state) and state.scaredTimer == 0):
+      if(state.scaredTimer == 0):
         enemyPosition = gameState.getAgentPosition(a)
         proximity = 999999
 
         if(enemyPosition != None):
           proximity = self.getMazeDistance(gameState.getAgentPosition(self.index), enemyPosition)
-          print("Enemy Proximity: " + str(proximity))
 
         if(proximity < closestEnemy):
           closestEnemy = proximity
@@ -204,7 +204,7 @@ class ReflexCaptureAgent(CaptureAgent):
     lowestPath = None
 
     for f in food:
-      path = self.findPathAndCost(gameState, f)
+      path = self.findPathAndCost(gameState, f, lowestCost)
       if(path != None and path[1] < lowestCost):
         lowestPath = path[0]
         lowestCost = path[1]
@@ -229,15 +229,16 @@ class CapsuleReflexAgent(ReflexCaptureAgent):
   """
 
   def chooseAction(self, gameState):
+
+    print("walls : " + str(gameState.data.layout.walls.asList()))
+
     capsule = self.getCapsules(gameState)
     if(len(capsule) > 0):
-      capsulePath = self.findPathAndCost(gameState, capsule[0])
+      capsulePath = self.findPathAndCost(gameState, capsule[0], 999999)
       if(capsulePath != None):
         return capsulePath[0][0]
-    if (len(self.getFood(gameState).asList()) > 0 and self.notHoldingGameWinningFood(gameState)):
+    if (len(self.getFood(gameState).asList()) > 2):
         return self.getLowestCostFoodPath(gameState)[0]
-
-
 
 class AttackReflexAgent(ReflexCaptureAgent):
   """
@@ -250,34 +251,6 @@ class AttackReflexAgent(ReflexCaptureAgent):
   def chooseAction(self, gameState):
     if (len(self.getFood(gameState).asList()) > 0 and self.notHoldingGameWinningFood(gameState)):
       return self.getLowestCostFoodPath(gameState)[0]
-
-  def getFeatures(self, gameState, action):
-    features = util.Counter()
-    successor = self.getSuccessor(gameState, action)
-
-    myState = successor.getAgentState(self.index)
-    myPos = myState.getPosition()
-
-    # Computes whether we're on defense (1) or offense (0)
-    features['onDefense'] = 1
-    if myState.isPacman: features['onDefense'] = 0
-
-    # Computes distance to invaders we can see
-    enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
-    invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
-    features['numInvaders'] = len(invaders)
-    if len(invaders) > 0:
-      dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-      features['invaderDistance'] = min(dists)
-
-    if action == Directions.STOP: features['stop'] = 1
-    rev = Directions.REVERSE[gameState.getAgentState(self.index).configuration.direction]
-    if action == rev: features['reverse'] = 1
-
-    return features
-
-  def getWeights(self, gameState, action):
-    return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -10, 'stop': -100, 'reverse': -2}
 
 class Node:
   state = None
