@@ -64,53 +64,13 @@ class ReflexCaptureAgent(CaptureAgent):
     self.start = gameState.getAgentPosition(self.index)
     CaptureAgent.registerInitialState(self, gameState)
 
-  def findBasicPath(self, gameState, agentIndex, travelTo):
-    openNodes = [Node(gameState, None, None, 0, 0)]
-    closedNodes = []
-    currentNode = openNodes[0]
-
-    while(len(openNodes) != 0):
-      nodeAndIndex = self.findLowestTotalCostNodeAndPop(openNodes)
-      currentNode = nodeAndIndex[0]
-      currentAgentPosition = currentNode.state.getAgentPosition(agentIndex)
-      del openNodes[nodeAndIndex[1]]
-
-      legalActions = currentNode.state.getLegalActions(agentIndex)  # gameState.getLegalActions(self.index)
-
-      successors = []
-      for action in legalActions:
-        # get game state after current agent moves
-        successor = currentNode.state.generateSuccessor(agentIndex, action)
-
-        heuristic = self.calculateBasicHeuristicCost(successor, successor.getAgentPosition(agentIndex), travelTo)
-
-        successors.append(Node(
-          successor,
-          currentNode,
-          action,
-          currentNode.generalCost + 1,
-          currentNode.generalCost + 1 + heuristic
-          ))
-
-      for s in successors:
-        if(self.agentPositionMatchesDestination(s, travelTo)):
-          path = self.generateBasicPathOfActions(s)
-          return path
-
-        if(self.nodeShouldBeOpened(s, openNodes, closedNodes)):
-          openNodes.append(s)
-      closedNodes.append(currentNode)
-    return None
-
   def findPathAndCost(self, gameState, agentIndex, travelTo, maxCost, checkForDeadend):
     openNodes = [Node(gameState, None, None, 0, 0)]
     closedNodes = []
-    currentNode = openNodes[0]
 
     while(len(openNodes) != 0):
       nodeAndIndex = self.findLowestTotalCostNodeAndPop(openNodes)
       currentNode = nodeAndIndex[0]
-      currentAgentPosition = currentNode.state.getAgentPosition(agentIndex)
       del openNodes[nodeAndIndex[1]]
 
       legalActions = currentNode.state.getLegalActions(agentIndex)  # gameState.getLegalActions(self.index)
@@ -122,7 +82,7 @@ class ReflexCaptureAgent(CaptureAgent):
         heuristics = self.calculateHeuristicCosts(successor, successor.getAgentPosition(agentIndex), travelTo)
 
         # if current successor is to expensive, don't evaluate further
-        if(heuristics[0] > maxCost):
+        if(currentNode.generalCost + heuristics[1] > maxCost):
           continue
 
         successors.append(Node(
@@ -137,7 +97,7 @@ class ReflexCaptureAgent(CaptureAgent):
 
       for s in successors:
         if(self.agentPositionMatchesDestination(s, travelTo)):
-          pathAndCost = self.generatePathOfActions(s, gameState, checkForDeadend)
+          pathAndCost = self.generatePathOfActions(s)
           return pathAndCost
 
         if(self.nodeShouldBeOpened(s, openNodes, closedNodes)):
@@ -159,9 +119,7 @@ class ReflexCaptureAgent(CaptureAgent):
     return (lowestNode, lowIndex)
 
   def agentPositionMatchesDestination(self, node, travelTo):
-    # agentPosition = node.state.getAgentPosition(self.index)
     agentX, agentY = node.state.getAgentPosition(self.index)
-    travelToX = travelTo[0]
     if(agentX == int(travelTo[0]) and int(agentY) == int(travelTo[1])):
       return True
     return False
@@ -178,16 +136,7 @@ class ReflexCaptureAgent(CaptureAgent):
 
     return True
 
-  def generateBasicPathOfActions(self, node):
-    actionList = []
-    currentNode = node
-    while (currentNode.parent != None):
-      actionList.insert(0, currentNode.action)
-      currentNode = currentNode.parent
-
-    return actionList
-
-  def generatePathOfActions(self, node, originalGameState, checkForDeadend):
+  def generatePathOfActions(self, node):
     totalCost = node.generalCost
     actionList = []
     currentNode = node
@@ -195,17 +144,10 @@ class ReflexCaptureAgent(CaptureAgent):
       actionList.insert(0, currentNode.action)
       currentNode = currentNode.parent
 
-    # if(checkForDeadend and self.pathIsDeadend(originalGameState, actionList)):
-    #   totalCost += 100
-
     return (actionList, totalCost)
-
-  def calculateBasicHeuristicCost(self, gameState, travelFrom, travelTo):
-    return self.getMazeDistance(travelFrom, travelTo)
 
   def calculateHeuristicCosts(self, gameState, travelFrom, travelTo):
     agentPosition = gameState.getAgentPosition(self.index)
-    distanceCost = 0
     enemyCost = 0
     teamateProximityCost = 0
     closestEnemy = 999999
@@ -235,13 +177,13 @@ class ReflexCaptureAgent(CaptureAgent):
     elif(closestEnemy == 2):
       enemyCost = 15
     elif(closestEnemy == 1):
-      enemyCost = 50
+      enemyCost = 30
 
     # minor cost added when in close proximity to teamate
     team = self.getTeam(gameState)
     for t in team:
       if(t != self.index and self.getMazeDistance(agentPosition, gameState.getAgentPosition(t)) < 4):
-        teamateProximityCost = 3
+        teamateProximityCost = 5
 
     return (enemyCost, distanceCost + enemyCost + teamateProximityCost)
 
@@ -260,7 +202,7 @@ class ReflexCaptureAgent(CaptureAgent):
   def getLowestCostRetreatPath(self, gameState):
     retreat = self.getRetreatCells(gameState)
 
-    lowestCost = 50
+    lowestCost = 125
     lowestPath = None
 
     for r in retreat:
@@ -274,7 +216,7 @@ class ReflexCaptureAgent(CaptureAgent):
   def getLowestCostFoodPath(self, gameState):
     food = self.getFood(gameState).asList()
 
-    lowestCost = 30
+    lowestCost = 60
     lowestPath = None
 
     while len(food) > 0:
@@ -299,13 +241,6 @@ class ReflexCaptureAgent(CaptureAgent):
 
     return lowestPath
 
-  def notHoldingGameWinningFood(self, gameState): #fixme
-    foodHolding = 0
-    agents = self.getTeam(gameState)
-    for a in agents:
-      foodHolding += gameState.getAgentState(a).numCarrying
-    return len(self.getFood(gameState).asList()) >= 2
-
   def getRetreatCells(self, gameState):
     homeSquares = []
     wallsMatrix = gameState.data.layout.walls
@@ -317,11 +252,11 @@ class ReflexCaptureAgent(CaptureAgent):
     layoutY = wallsMatrix.height - 1
 
     # create list of homeSquares
-    if (gameState.isOnRedTeam(self.index)):  # how to tell if redTeam
+    if (gameState.isOnRedTeam(self.index)):
       # Creates a list of home spaces for red Team
       for y in range(1, layoutY - 1):
         if ((redX, y) not in wallsList):
-          homeSquares.append((redX, y))  # check if space is wall
+          homeSquares.append((redX, y))
     else:
       # Creates a list of home spaces for blue Team
       for y in range(1, layoutY - 1):
@@ -330,52 +265,12 @@ class ReflexCaptureAgent(CaptureAgent):
 
     return homeSquares
 
-  def pathIsDeadend(self, gameState, path):
-    currentPosition = gameState.getAgentPosition(self.index)
-    enemies = self.getOpponents(gameState)
-    nearestEnemy = None
-    closestDistance = 5
-
-    for e in enemies:
-      enemyPosition = gameState.getAgentPosition(e)
-
-      # check if agent has access to enemyPosition
-      if(enemyPosition == None and "Ghost" in str(gameState.getAgentState(e))):
-        continue
-
-      distanceFromEnemy = self.getMazeDistance(enemyPosition, currentPosition)
-      if(distanceFromEnemy < closestDistance):
-        nearestEnemy = e
-
-    if(nearestEnemy == None):
-      return False
-
-    # follow given path while nearest enemy follows
-    currentGameState = gameState
-    for p in path:
-
-      # if can be intercepted, treat this route as a deadend
-      if(not p in currentGameState.getLegalActions(self.index)):
-        return True
-
-      currentGameState = currentGameState.generateSuccessor(self.index, p)
-
-      enemyPath = self.findBasicPath(currentGameState, nearestEnemy, currentGameState.getAgentPosition(self.index))
-      currentGameState = currentGameState.generateSuccessor(nearestEnemy, enemyPath[0])
-
-    # if no solution for retreat return true
-    retreatPath = self.getLowestCostRetreatPath(gameState)
-    if(retreatPath == None):
-      return True
-    else:
-      return False
-
   def shouldRetreat(self, gameState):
     opponents = self.getOpponents(gameState)
     for o in opponents:
       position = gameState.getAgentPosition(o)
-      if(position != None and self.getMazeDistance(position, gameState.getAgentPosition(self.index)) <= 5
-              and gameState.getAgentState(o).scaredTimer == 0):
+      if(position != None and self.getMazeDistance(position, gameState.getAgentPosition(self.index)) <= 4
+              and gameState.getAgentState(o).scaredTimer == 0) and gameState.getAgentState(self.index).isPacman:
         return True
 
 class CapsuleReflexAgent(ReflexCaptureAgent):
@@ -387,26 +282,31 @@ class CapsuleReflexAgent(ReflexCaptureAgent):
 
   def chooseAction(self, gameState):
     opponents = self.getOpponents(gameState)
-    retreatPath = self.getLowestCostRetreatPath(gameState)
-
     capsule = self.getCapsules(gameState)
+
     # if capsule is not in effect and there is a remaining capsule
     # print("length of capsules: " + str(len(capsule)))
     if((gameState.getAgentState(opponents[0]).scaredTimer == 0 or gameState.getAgentState(opponents[1]).scaredTimer == 0)
             and len(capsule) != 0):
-      capsulePath = self.findPathAndCost(gameState, self.index, capsule[0], 30, True)
+      capsulePath = self.findPathAndCost(gameState, self.index, capsule[0], 150, True)
       if(capsulePath != None):
         return capsulePath[0][0]
+
     if(self.shouldRetreat(gameState)):
+      retreatPath = self.getLowestCostRetreatPath(gameState)
       if(retreatPath != None):
         return retreatPath[0]
+
     # if we have not eaten enough food to win
     if (len(self.getFood(gameState).asList()) > 2):
         foodPath = self.getLowestCostFoodPath(gameState)
         if(foodPath != None):
           return foodPath[0]
+
+    retreatPath = self.getLowestCostRetreatPath(gameState)
     if(retreatPath != None):
       return retreatPath[0]
+
     return "Stop"
 
 
@@ -419,18 +319,22 @@ class AttackReflexAgent(ReflexCaptureAgent):
   """
 
   def chooseAction(self, gameState):
-    retreatPath = self.getLowestCostRetreatPath(gameState)
 
     if (self.shouldRetreat(gameState)):
+      retreatPath = self.getLowestCostRetreatPath(gameState)
       if (retreatPath != None):
         return retreatPath[0]
-      # if we have not eaten enough food to win
+
+    # if we have not eaten enough food to win
     if (len(self.getFood(gameState).asList()) > 2):
       foodPath = self.getLowestCostFoodPath(gameState)
       if (foodPath != None):
         return foodPath[0]
+
+    retreatPath = self.getLowestCostRetreatPath(gameState)
     if(retreatPath != None):
       return retreatPath[0]
+
     return "Stop"
 
 class Node:
