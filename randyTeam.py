@@ -18,6 +18,7 @@ import distanceCalculator
 import random, time, util, sys
 from game import Directions
 import game
+import capture
 from util import nearestPoint
 import numpy as np
 
@@ -25,7 +26,16 @@ score_change = 0
 start_score = 0
 start_time = time.time()
 elapsed_time = 0
+insertion = 0
 minimum = True
+at_pos = False
+moving = False
+newPosition = (1,1)
+move = [(-1,-1)] * 50
+prevNewPos = (1,1)
+
+
+
 #################
 # Team creation #
 #################
@@ -36,6 +46,7 @@ def createTeam(firstIndex, secondIndex, isRed,
   team, initialized using firstIndex and secondIndex as their agent
   index numbers.  isRed is True if the red team is being created, and
   will be False if the blue team is being created.
+
   As a potentially helpful development aid, this function can take
   additional string-valued keyword arguments ("first" and "second" are
   such arguments in the case of this function), which will come from
@@ -80,6 +91,7 @@ class ReflexCaptureAgent(CaptureAgent):
     #   print(bestActions, file=sys.stderr)
     '''
     foodLeft = len(self.getFood(gameState).asList())
+
     if foodLeft <= 2 or gameState.getAgentState(self.index).numCarrying > 5:
       bestDist = 9999
       for action in actions:
@@ -90,7 +102,7 @@ class ReflexCaptureAgent(CaptureAgent):
           bestAction = action
           bestDist = dist
       return bestAction
-      '''
+    '''
     return random.choice(bestActions)
 
   def getSuccessor(self, gameState, action):
@@ -190,10 +202,11 @@ class ReflexCaptureAgent(CaptureAgent):
     """
     This function will adjust the position if it is a wall tile
     to an adjacent position.
+
     Red will try a location on the right first to be closer to 
     the border and blue will look for locations on the left.
     """
-    if (self.red):
+    if x > -1:
       if (gameState.data.layout.isWall((x,y))):
         if (not gameState.data.layout.isWall((x+1, y))):
           return (x+1, y)
@@ -214,26 +227,31 @@ class ReflexCaptureAgent(CaptureAgent):
       else:
         return (x,y)
     else:
-      if (gameState.data.layout.isWall((x,y))):
-        if (not gameState.data.layout.isWall((x-1, y))):
-          return (x-1, y)
-        elif (not gameState.data.layout.isWall((x-1, y+1))):
-          return (x-1, y+1)
-        elif (not gameState.data.layout.isWall((x-1, y-1))):
-          return (x-1, y-1)
-        elif (not gameState.data.layout.isWall((x, y+1))):
-          return (x, y+1)
-        elif (not gameState.data.layout.isWall((x, y-1))):
-          return (x, y-1)
-        elif (not gameState.data.layout.isWall((x+1, y+1))):
-          return (x+1, y+1)
-        elif (not gameState.data.layout.isWall((x+1, y))):
-          return (x+1, y)
-        else:
-          return (x+1, y-1)
-      else:
-        return (x,y)
+      return (4, 4)
   
+  def makeNewPos(self, gameState, x, y):
+    if x < 16 and not self.red:
+      x += 4
+    elif x > 15 and self.red:
+      x -= 4
+    if y < 8:
+      y += 4
+    else:
+      y -= 4
+    # if (x >= 16 and self.red):
+    #   x = x / 2
+    # elif (x < 5 and x > 1 and not self.red):
+    #   x = x * x
+    # else:
+    #   x = x * 2
+    # if (y >= 8):
+    #   y = y / 2
+    # elif (y < 4 and y > 1):
+    #   y = y * y
+    # else: 
+    #   y = y * 2
+    return (int (x), int (y))
+
 
 
 class OffensiveReflexAgent(ReflexCaptureAgent):
@@ -248,21 +266,144 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
     global minimum
     global start_time
     global elapsed_time
+    global prev_pos
+    global insertion
+    global move
+    global newPosition
+    global at_pos
+    global moving
+    global prevNewPos
+
     retreat = True
     features = util.Counter()
     successor = self.getSuccessor(gameState, action)
-
+    
+    
     myState = successor.getAgentState(self.index)
     myPos = myState.getPosition()
+    
+    if myPos == self.start:
+        moving = False
+        at_pos = False
 
     foodList = self.getFood(successor).asList()    
     features['successorScore'] = -len(foodList)#self.getScore(successor)
+
+
+    if(self.red and ReflexCaptureAgent.getScore(self, gameState) > 0 or
+       not self.red and ReflexCaptureAgent.getScore(self, gameState) < 0):
+
+      friendPos = None
+      friend = [successor.getAgentState(i) for i in self.getTeam(successor)]
+      for i in friend:
+        if i.getPosition() != myPos:
+          friendPos = i.getPosition()
+      
+
+       # Computes distance to invaders we can see
+      enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+      invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
+      defenders = [b for b in enemies if not b.isPacman and b.getPosition() != None]
+      features['numInvaders'] = len(invaders)
+      
+      #friend_pos = ReflexCaptureAgent.(self, gameState)
+      #print(friend_pos)
+
+      if len(invaders) > 0:
+        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+        friend_dist = [self.getMazeDistance(friendPos, a.getPosition()) for a in invaders]
+        if friend_dist is not None:
+          if min(dists) <= min(friend_dist):
+            features['invaderDistance'] = min(dists)
+    
+      foodCentroid = ReflexCaptureAgent.getFoodCentroid(self, gameState)
+      foodCentroid = ReflexCaptureAgent.makeLegalPosition(self, gameState, foodCentroid[0], foodCentroid[1])
+
+      capsule = ReflexCaptureAgent.getCapsulesYouAreDefending(self,gameState)
+      if (capsule):
+        meanCapsFood = ((capsule[0][0] + foodCentroid[0])/2, (capsule[0][1] + foodCentroid[1])/2)
+        meanCapsFood = ReflexCaptureAgent.makeLegalPosition(self, gameState, meanCapsFood[0], meanCapsFood[1])
+        features['mean'] = self.getMazeDistance(myPos, meanCapsFood)      
+      else:
+        meanCapsFood = foodCentroid
+        features['mean'] = self.getMazeDistance(myPos, meanCapsFood)
+      features['onDefense'] = 1 
+      meanCapsFood = ((meanCapsFood[0] + 16)/2, (meanCapsFood[1])/2)
+      meanCapsFood = ReflexCaptureAgent.makeLegalPosition(self, gameState, meanCapsFood[0], meanCapsFood[1])
+      features['mean'] = self.getMazeDistance(myPos, meanCapsFood)  
+
+      return features
+    
+
+    pPos = None
+    # collect last 5 pos
+    if insertion > 55:  
+      previous = self.getPreviousObservation()
+      pstate = previous.getAgentState(self.index)
+      pPos = pstate.getPosition()
+      move[insertion%50] = pPos
+
+    # for all elements if still within 2 pos of original
+    if insertion > 200:
+      first_pos = move[0]
+      far = False
+      for index in range(1, 25):
+        #print(move[index])
+        #print(self.getMazeDistance(first_pos,move[index]))
+
+        if self.getMazeDistance(first_pos,move[index]) > 5:
+          far = True 
+        #else:
+        #  print ("Close")
+      #print()
+      
+
+      #print("B")
+      if (not far):
+        if (not at_pos and not moving):
+          newPosition = ReflexCaptureAgent.makeNewPos(self, gameState, myPos[0], myPos[1])
+          newPosition = ReflexCaptureAgent.makeLegalPosition(self, gameState, newPosition[0], newPosition[1])
+          moving = True
+
+      if self.getMazeDistance(myPos, newPosition) == 0 and self.getMazeDistance(myPos, prevNewPos) != 0:
+        at_pos = True
+        moving = False
+        prevNewPos = newPosition
+        print("at_pos")
+      elif self.getMazeDistance(myPos, newPosition) == 0 and self.getMazeDistance(myPos, prevNewPos) == 0: 
+        newPosition = ReflexCaptureAgent.makeNewPos(self, gameState, myPos[0], myPos[1])
+      else:
+        print("reset")
+        at_pos = False
+      
+      if moving:
+        print("moving")
+        new_dist = self.getMazeDistance(myPos, newPosition)
+        features['new_pos'] = new_dist
+        return features
+      
+      
+          #Reset 
+          #newPosition = (1,1)
+        #new_dist = self.getMazeDistance(myPos, newPosition)
+        #print("Not Far")
+        # change pos
+        # new_pos = (int(myPos[0]),int((myPos[1]+8)/2))
+        # new_pos = ReflexCaptureAgent.makeLegalPosition(self, gameState, new_pos[0], new_pos[1])
+        # new_dist = self.getMazeDistance(myPos, new_pos)
+        # if myState.isPacman:
+        #   features['goaround'] = new_dist
+        #   print("Go Around")
+
+    insertion = insertion + 1
+    
 
     # Compute distance to the nearest food
     if len(foodList) > 0: # This should always be True,  but better safe than sorry
       myPos = successor.getAgentState(self.index).getPosition()
       minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
       features['distanceToFood'] = minDistance
+    
 
     # Determine if the enemy is closer to you than they were last time
     # and you are in their territory.
@@ -313,7 +454,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         features['distanceToFood'] = startDistance
         
         
-    if foodLeft <= 2 or food_carried > 5:
+    if foodLeft <= 2 or food_carried > 0:
         features['distanceToFood'] = startDistance
     
     if count > 2 and close_dist <= 7:
@@ -338,45 +479,11 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         features['distanceToFood'] = 0
         features['successorScore'] = 0
     ''' 
-    
-    if(self.red and ReflexCaptureAgent.getScore(self, gameState) > 0 or
-       not self.red and ReflexCaptureAgent.getScore(self, gameState) < 0):
-
-       # Computes distance to invaders we can see
-      enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
-      invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
-      defenders = [b for b in enemies if not b.isPacman and b.getPosition() != None]
-      features['numInvaders'] = len(invaders)
-
-      if len(invaders) > 0:
-        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-        features['invaderDistance'] = min(dists)
-    
-      foodCentroid = ReflexCaptureAgent.getFoodCentroid(self, gameState)
-      foodCentroid = ReflexCaptureAgent.makeLegalPosition(self, gameState, foodCentroid[0], foodCentroid[1])
-      # features['foodCentroid'] = self.getMazeDistance(myPos, foodCentroid)
-
-      capsule = ReflexCaptureAgent.getCapsulesYouAreDefending(self,gameState)
-      if (capsule):
-        # features['capsule'] = self.getMazeDistance(myPos, capsule[0])
-        meanCapsFood = ((capsule[0][0] + foodCentroid[0])/2, (capsule[0][1] + foodCentroid[1])/2)
-        meanCapsFood = ReflexCaptureAgent.makeLegalPosition(self, gameState, meanCapsFood[0], meanCapsFood[1])
-        features['mean'] = self.getMazeDistance(myPos, meanCapsFood)      
-      else:
-        meanCapsFood = foodCentroid
-        features['mean'] = self.getMazeDistance(myPos, meanCapsFood)
-      features['onDefense'] = 1 
-      meanCapsFood = ((meanCapsFood[0] + 16)/2, (meanCapsFood[1])/2)
-      meanCapsFood = ReflexCaptureAgent.makeLegalPosition(self, gameState, meanCapsFood[0], meanCapsFood[1])
-      # features['foodCentroid'] = 0
-      # features['capsule'] = 0
-      print(meanCapsFood)
-      features['mean'] = self.getMazeDistance(myPos, meanCapsFood)  
 
     return features
 
   def getWeights(self, gameState, action):
-    return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -15, 
+    return {'numInvaders': -1000, 'new_pos': -20,'onDefense': 100, 'invaderDistance': -15, 
             'mean': -10, 'successorScore': 100, 'distanceToFood': -1, 'fleeEnemy': -100.0}
 
   
@@ -401,13 +508,28 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
 
     # Computes distance to invaders we can see
     enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+    enemy = [a for a in enemies if not a.isPacman and a.getPosition() != None]
     invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
     defenders = [b for b in enemies if not b.isPacman and b.getPosition() != None]
     features['numInvaders'] = len(invaders)
 
+    friendPos = myPos
+    friend = [successor.getAgentState(i) for i in self.getTeam(successor)]
+    for i in friend:
+      if i.getPosition() != myPos:
+        friendPos = i.getPosition()
+    
     if len(invaders) > 0:
       dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
-      features['invaderDistance'] = min(dists)
+      friend_dists = [self.getMazeDistance(friendPos, a.getPosition()) for a in invaders]
+      if min(dists) <= min(friend_dists):
+        features['invaderDistance'] = min(dists)
+
+    if len(enemy) > 1:
+        dists = [self.getMazeDistance(myPos, a.getPosition()) for a in enemy]
+        friend_dists = [self.getMazeDistance(friendPos, a.getPosition()) for a in enemy]
+        if min(dists) <= min(friend_dists):
+          features['enemyDistance'] = min(dists)
     
     foodCentroid = ReflexCaptureAgent.getFoodCentroid(self, gameState)
     # features['foodCentroid'] = self.getMazeDistance(myPos, foodCentroid)
@@ -427,16 +549,11 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
     
     if(self.red and ReflexCaptureAgent.getScore(self, gameState) > 0 or
        not self.red and ReflexCaptureAgent.getScore(self, gameState) < 0):
-      print(meanCapsFood)
-      meanCapsFood = ((meanCapsFood[0] + 16)/2, (meanCapsFood[1] + 16)/2)
+      meanCapsFood = ((meanCapsFood[0]+16)/2, (meanCapsFood[1]+16)/2)
       meanCapsFood = ReflexCaptureAgent.makeLegalPosition(self, gameState, meanCapsFood[0], meanCapsFood[1])
-      print(meanCapsFood)
-      # features['foodCentroid'] = 0
-      # features['capsule'] = 0
-      print()
       features['mean'] = self.getMazeDistance(myPos, meanCapsFood)  
     
     return features
 
   def getWeights(self, gameState, action):
-    return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -15, 'mean': -10}
+    return {'numInvaders': -1000, 'onDefense': 100, 'invaderDistance': -15, 'enemyDistance': -5, 'mean': -10}
