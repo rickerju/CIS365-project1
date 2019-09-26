@@ -159,7 +159,7 @@ class ReflexCaptureAgent(CaptureAgent):
     agents = self.getOpponents(gameState)
     for a in agents:
       state = gameState.getAgentState(a)
-      if(state.scaredTimer == 0):
+      if(state.scaredTimer == 0 and state.isPacman):
         enemyPosition = gameState.getAgentPosition(a)
         proximity = 999999
 
